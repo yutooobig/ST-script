@@ -1,5 +1,5 @@
 /* ============================================================
- * 预设正则快照 (Regex Snapshot) v3
+ * 预设正则快照 (Regex Snapshot) v3.1
  * ============================================================
  * 解决什么问题：
  *   聊天中途换预设后，跟随旧预设的正则失效，导致前文里
@@ -7,8 +7,7 @@
  *
  * 工作原理（快照全部保存在脚本内部，不驻留全局正则）：
  *   1. 在魔法棒(扩展)菜单里点「预设正则快照」打开管理窗口
- *   2. 点「拍快照」：把当前预设中启用的正则保存到脚本变量，
- *      命名为 [快照|预设名] 原名。
+ *   2. 点「拍快照」：把当前预设中启用的正则保存到脚本变量。
  *   3. 动态挂载（叠加核心）：
  *      · 当前预设没有等效正则 → 该快照自动写入全局正则并生效
  *        （挂载条目在正则面板中自动隐藏，完全不可见）
@@ -21,6 +20,9 @@
  *   刷新        重新校准挂载状态
  *   清空        删除全部快照
  *   每条快照：电源图标 手动开关 · 机器人图标 恢复自动 · 叉号 删除
+ *   右上角画板图标：循环切换 日间 / 夜间 / 酒馆适配 三套主题
+ *   （酒馆适配版使用 --SmartThemeQuoteColor 重点色、
+ *    --SmartThemeBlurTintColor 主背景色等酒馆原生主题变量）
  *
  * 注意：
  *   · 手动开关过的快照转为「手动管理」，脚本按你的设置固定
@@ -91,13 +93,17 @@
     return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
   };
  
+  const getVars = () => {
+    try { return getVariables({ type: 'script' }) ?? {}; } catch { return {}; }
+  };
+ 
   /* ============================================================
    * 数据层：快照保存在脚本变量里
    * ============================================================ */
  
   // 数据结构: { snapshots: [{ id, preset, origName, mode: 'auto'|'on'|'off', regex: {...} }] }
   const getData = () => {
-    const vars = (() => { try { return getVariables({ type: 'script' }) ?? {}; } catch { return {}; } })();
+    const vars = getVars();
     const d = vars[VAR_KEY];
     return (d && Array.isArray(d.snapshots)) ? d : { snapshots: [] };
   };
@@ -292,71 +298,255 @@
    * 管理窗口 UI（SillyTavern.Popup）
    * ============================================================ */
  
+  // ---------- 主题 ----------
+  const THEMES = ['st', 'light', 'dark'];
+  const THEME_ICON = { st: 'fa-palette', light: 'fa-sun', dark: 'fa-moon' };
+  const THEME_NAME = { st: '酒馆适配', light: '日间', dark: '夜间' };
+  let currentTheme = (() => {
+    const t = getVars().rxTheme;
+    return THEMES.includes(t) ? t : 'st';
+  })();
+ 
+  function cycleTheme() {
+    const next = THEMES[(THEMES.indexOf(currentTheme) + 1) % THEMES.length];
+    currentTheme = next;
+    try {
+      updateVariablesWith((v) => ({ ...(v ?? {}), rxTheme: next }), { type: 'script' });
+    } catch {}
+    const dlg = panelPopup?.dlg;
+    if (dlg) {
+      const root = dlg.querySelector('#rxsnap');
+      if (root) root.dataset.theme = next;
+      const icon = dlg.querySelector('.rxsnap-theme-btn i');
+      if (icon) icon.className = `fa-solid ${THEME_ICON[next]}`;
+    }
+    notify('info', `主题：${THEME_NAME[next]}`);
+  }
+ 
+  // ---------- 样式（CSS 变量驱动三套主题） ----------
   const panelCSS = `
 <style>
-#rxsnap { max-width: 660px; }
-#rxsnap .rxsnap-title {
-  display: flex; align-items: center; gap: 8px;
-  font-size: 1.15em; font-weight: 700; margin-bottom: 2px;
-  padding-right: 40px; /* 给收进来的关闭按钮让位 */
+/* ===== 主题变量：挂在弹窗层级，背景/文字/关闭按钮统一跟随 ===== */
+.popup:has(#rxsnap[data-theme="light"]) {
+  --rx-bg: #ffffff;
+  --rx-surface: #f5f6f8;
+  --rx-surface-hover: #edeef1;
+  --rx-border: #e4e6eb;
+  --rx-text: #262a31;
+  --rx-dim: #6f7580;
+  --rx-accent: #3672f9;
+  --rx-accent-contrast: #ffffff;
+  --rx-accent-soft: rgba(54,114,249,.10);
+  --rx-on: #1d9e5f;
+  --rx-on-soft: rgba(29,158,95,.11);
+  --rx-off: #7d848e;
+  --rx-off-soft: rgba(125,132,142,.13);
+  --rx-warn: #b07a12;
+  --rx-warn-soft: rgba(176,122,18,.11);
+  --rx-danger: #d6404a;
+  --rx-close-bg: rgba(0,0,0,.06);
 }
-#rxsnap .rxsnap-title i { opacity: .85; }
-#rxsnap .rxsnap-sub { opacity: .8; font-size: .9em; margin: 4px 0 10px; }
-#rxsnap .rxsnap-sub b { word-break: break-all; }
-#rxsnap .rxsnap-sub i { margin: 0 1px; }
-#rxsnap .rxsnap-actions { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
-#rxsnap .rxsnap-actions .menu_button {
-  flex: 1 1 0; min-width: 0; margin: 0;
-  display: flex; align-items: center; justify-content: center; gap: 6px;
-  white-space: nowrap; cursor: pointer;
+.popup:has(#rxsnap[data-theme="dark"]) {
+  --rx-bg: #24272c;
+  --rx-surface: #2d3138;
+  --rx-surface-hover: #373c45;
+  --rx-border: #3e4450;
+  --rx-text: #e9ecef;
+  --rx-dim: #99a0ab;
+  --rx-accent: #85b3ff;
+  --rx-accent-contrast: #161a22;
+  --rx-accent-soft: rgba(133,179,255,.13);
+  --rx-on: #5fc484;
+  --rx-on-soft: rgba(95,196,132,.13);
+  --rx-off: #828896;
+  --rx-off-soft: rgba(130,136,150,.15);
+  --rx-warn: #dcb268;
+  --rx-warn-soft: rgba(220,178,104,.13);
+  --rx-danger: #f3737a;
+  --rx-close-bg: rgba(255,255,255,.08);
 }
-#rxsnap-body .rxsnap-empty { opacity: .7; padding: 18px 4px; text-align: center; }
-#rxsnap-body .rxsnap-empty i { display: block; font-size: 1.6em; margin-bottom: 8px; }
-#rxsnap-body .rxsnap-grouptitle {
-  display: flex; align-items: center; gap: 6px;
-  font-weight: 700; margin: 10px 0 4px; opacity: .9;
+.popup:has(#rxsnap[data-theme="st"]) {
+  --rx-bg: var(--SmartThemeBlurTintColor, #2a2d33);
+  --rx-surface: rgba(128,128,128,.14);
+  --rx-surface-hover: rgba(128,128,128,.26);
+  --rx-border: var(--SmartThemeBorderColor, rgba(128,128,128,.35));
+  --rx-text: var(--SmartThemeFontColor, #e9ecef);
+  --rx-dim: var(--SmartThemeFontColor, #99a0ab);
+  --rx-dim: color-mix(in srgb, var(--SmartThemeFontColor, #99a0ab) 68%, transparent);
+  --rx-accent: var(--SmartThemeQuoteColor, #85b3ff);
+  --rx-accent-contrast: var(--SmartThemeBlurTintColor, #161a22);
+  --rx-accent-soft: rgba(128,128,128,.16);
+  --rx-accent-soft: color-mix(in srgb, var(--SmartThemeQuoteColor, #85b3ff) 15%, transparent);
+  --rx-on: #5fc484;
+  --rx-on-soft: rgba(95,196,132,.13);
+  --rx-off: #8a8f99;
+  --rx-off-soft: rgba(138,143,153,.15);
+  --rx-warn: #dcb268;
+  --rx-warn-soft: rgba(220,178,104,.13);
+  --rx-danger: #e5726f;
+  --rx-close-bg: rgba(128,128,128,.25);
 }
-#rxsnap-body .rxsnap-grouptitle small { font-weight: 400; opacity: .6; margin-left: 2px; }
-#rxsnap-body .rxsnap-item {
-  display: flex; justify-content: space-between; align-items: center; gap: 8px;
-  background: rgba(128,128,128,.13); border: 1px solid rgba(128,128,128,.26);
-  border-radius: 8px; padding: 6px 10px; margin: 4px 0;
+ 
+/* ===== 弹窗本体：背景/文字色跟随主题 ===== */
+.popup:has(#rxsnap) {
+  background-color: var(--rx-bg, var(--SmartThemeBlurTintColor)) !important;
+  color: var(--rx-text) !important;
+  transition: background-color .25s ease, color .25s ease;
 }
-#rxsnap-body .rxsnap-main { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
-#rxsnap-body .rxsnap-badge { font-size: .82em; white-space: nowrap; opacity: .95; }
-#rxsnap-body .rxsnap-name { font-weight: 600; word-break: break-all; }
-#rxsnap-body .rxsnap-meta { opacity: .6; font-size: .8em; white-space: nowrap; }
-#rxsnap-body .rxsnap-meta i { margin: 0 1px; }
-#rxsnap-body .rxsnap-ops { display: flex; gap: 4px; flex-shrink: 0; }
-#rxsnap-body .rxsnap-ops button {
-  background: transparent; border: 1px solid rgba(128,128,128,.4);
-  border-radius: 6px; padding: 2px 9px; cursor: pointer; color: inherit; font-size: .9em;
-  display: flex; align-items: center; justify-content: center;
-}
-#rxsnap-body .rxsnap-ops button:hover { background: rgba(128,128,128,.28); }
-#rxsnap .rxsnap-tip { opacity: .55; font-size: .8em; margin-top: 12px; line-height: 1.7; }
-#rxsnap .rxsnap-tip i { margin: 0 1px; }
-/* 把酒馆默认“突出在弹窗边角外”的关闭按钮收进窗口内 */
+ 
+/* ===== 关闭按钮：收进窗口内并主题化 ===== */
 .popup:has(#rxsnap) .popup-button-close {
   position: absolute !important;
   top: 10px !important;
   right: 10px !important;
   left: auto !important;
   bottom: auto !important;
-  background: rgba(128,128,128,.22);
-  border-radius: 50%;
+  background: var(--rx-close-bg, rgba(128,128,128,.22)) !important;
+  border-radius: 10px;
+  color: var(--rx-dim, inherit);
   z-index: 10;
+  transition: background .15s ease, color .15s ease;
 }
+.popup:has(#rxsnap) .popup-button-close:hover {
+  background: var(--rx-surface-hover, rgba(128,128,128,.3)) !important;
+  color: var(--rx-text, inherit) !important;
+}
+ 
+/* ===== 布局 ===== */
+#rxsnap {
+  max-width: 680px;
+  color: var(--rx-text);
+  font-size: 14px;
+  line-height: 1.5;
+}
+#rxsnap button { font-family: inherit; }
+#rxsnap button:focus { outline: none; }
+#rxsnap button:focus-visible { outline: 2px solid var(--rx-accent); outline-offset: 1px; }
+ 
+#rxsnap .rxsnap-head {
+  display: flex; align-items: center; gap: 10px;
+  padding-right: 44px; /* 给关闭按钮让位 */
+  margin-bottom: 2px;
+}
+#rxsnap .rxsnap-title {
+  display: flex; align-items: center; gap: 9px;
+  font-size: 1.12em; font-weight: 700; letter-spacing: .01em;
+}
+#rxsnap .rxsnap-title i { color: var(--rx-accent); }
+#rxsnap .rxsnap-theme-btn {
+  margin-left: auto;
+  width: 30px; height: 30px;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--rx-surface); color: var(--rx-dim);
+  border: 1px solid var(--rx-border); border-radius: 10px;
+  cursor: pointer; transition: all .15s ease;
+}
+#rxsnap .rxsnap-theme-btn:hover { background: var(--rx-surface-hover); color: var(--rx-text); }
+ 
+#rxsnap .rxsnap-sub { font-size: .88em; color: var(--rx-dim); margin: 3px 0 14px; }
+#rxsnap .rxsnap-sub b { color: var(--rx-text); font-weight: 600; }
+#rxsnap .rxsnap-sub .fa-plug { color: var(--rx-on); }
+#rxsnap .rxsnap-sub .fa-hand { color: var(--rx-warn); }
+ 
+/* ===== 操作按钮：主次分明 ===== */
+#rxsnap .rxsnap-actions { display: flex; gap: 8px; margin-bottom: 14px; }
+#rxsnap .rxsnap-btn {
+  flex: 1 1 0; min-width: 0;
+  display: flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  font-size: .92em; font-weight: 500;
+  cursor: pointer; user-select: none; white-space: nowrap;
+  transition: all .15s ease;
+}
+#rxsnap .rxsnap-btn-primary {
+  background: var(--rx-accent); color: var(--rx-accent-contrast);
+  border: 1px solid transparent;
+}
+#rxsnap .rxsnap-btn-primary:hover { filter: brightness(1.08); }
+#rxsnap .rxsnap-btn-ghost {
+  background: var(--rx-surface); color: var(--rx-text);
+  border: 1px solid var(--rx-border);
+}
+#rxsnap .rxsnap-btn-ghost:hover { background: var(--rx-surface-hover); }
+#rxsnap .rxsnap-btn-danger { color: var(--rx-danger); }
+#rxsnap .rxsnap-btn-danger:hover { border-color: var(--rx-danger); }
+ 
+/* ===== 列表 ===== */
+#rxsnap-body .rxsnap-empty { text-align: center; padding: 26px 10px; color: var(--rx-dim); }
+#rxsnap-body .rxsnap-empty i { display: block; font-size: 1.7em; margin-bottom: 8px; color: var(--rx-accent); opacity: .75; }
+ 
+#rxsnap-body .rxsnap-grouptitle {
+  display: flex; align-items: center; gap: 7px;
+  margin: 14px 0 5px;
+  font-size: .8em; font-weight: 700;
+  color: var(--rx-dim); letter-spacing: .05em;
+}
+#rxsnap-body .rxsnap-grouptitle i { color: var(--rx-accent); opacity: .8; }
+#rxsnap-body .rxsnap-grouptitle::after {
+  content: ''; flex: 1; height: 1px; background: var(--rx-border);
+}
+#rxsnap-body .rxsnap-count {
+  background: var(--rx-accent-soft); color: var(--rx-accent);
+  border-radius: 999px; padding: 1px 8px;
+  font-size: .92em; font-weight: 600;
+}
+ 
+#rxsnap-body .rxsnap-item {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  background: var(--rx-surface);
+  border: 1px solid var(--rx-border);
+  border-radius: 10px;
+  padding: 8px 12px; margin: 5px 0;
+  transition: background .15s ease;
+}
+#rxsnap-body .rxsnap-item:hover { background: var(--rx-surface-hover); }
+#rxsnap-body .rxsnap-main { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; min-width: 0; }
+#rxsnap-body .rxsnap-name { font-weight: 600; word-break: break-all; }
+#rxsnap-body .rxsnap-meta { color: var(--rx-dim); font-size: .8em; white-space: nowrap; display: flex; align-items: center; }
+#rxsnap-body .rxsnap-meta i { margin: 0 1px; }
+ 
+/* 状态徽章：pill 样式，色彩语义化 */
+#rxsnap-body .rxsnap-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  font-size: .76em; font-weight: 600; white-space: nowrap;
+  border-radius: 999px; padding: 2px 9px;
+}
+#rxsnap-body .rxsnap-badge.on { background: var(--rx-on-soft); color: var(--rx-on); }
+#rxsnap-body .rxsnap-badge.off { background: var(--rx-off-soft); color: var(--rx-off); }
+#rxsnap-body .rxsnap-badge.manual { background: var(--rx-warn-soft); color: var(--rx-warn); }
+ 
+#rxsnap-body .rxsnap-ops { display: flex; gap: 5px; flex-shrink: 0; }
+#rxsnap-body .rxsnap-ops button {
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid var(--rx-border);
+  border-radius: 8px; cursor: pointer; color: var(--rx-dim);
+  font-size: .85em; transition: all .15s ease;
+}
+#rxsnap-body .rxsnap-ops button:hover { color: var(--rx-text); background: var(--rx-surface-hover); }
+#rxsnap-body .rxsnap-ops button.rxsnap-del:hover { color: var(--rx-danger); border-color: var(--rx-danger); }
+ 
+/* ===== 说明区 ===== */
+#rxsnap .rxsnap-tip {
+  margin-top: 14px; padding: 10px 12px;
+  background: var(--rx-surface);
+  border-radius: 10px;
+  border-left: 3px solid var(--rx-accent);
+  font-size: .78em; color: var(--rx-dim); line-height: 1.85;
+}
+#rxsnap .rxsnap-tip .fa-plug { color: var(--rx-on); }
+#rxsnap .rxsnap-tip .fa-hand { color: var(--rx-warn); }
 </style>`;
  
-  // 状态图标（FontAwesome）
+  // 状态图标（颜色由徽章/容器类控制，不写内联样式）
   const ICON = {
-    on: '<i class="fa-solid fa-circle" style="color:#6db56d"></i>',
-    off: '<i class="fa-solid fa-circle" style="color:rgba(190,190,190,.5)"></i>',
-    hand: '<i class="fa-solid fa-hand" style="color:#d4a259"></i>',
+    on: '<i class="fa-solid fa-circle"></i>',
+    off: '<i class="fa-solid fa-circle"></i>',
+    hand: '<i class="fa-solid fa-hand"></i>',
     power: '<i class="fa-solid fa-power-off"></i>',
     robot: '<i class="fa-solid fa-robot"></i>',
-    plug: '<i class="fa-solid fa-plug" style="color:#6db56d"></i>',
+    plug: '<i class="fa-solid fa-plug"></i>',
   };
  
   const destText = (r) => {
@@ -417,7 +607,7 @@
   function renderSubHTML(d) {
     const mounted = d.snapshots.filter((s) => d.mountedIds.has(s.id)).length;
     const manual = d.snapshots.filter((s) => s.mode !== 'auto').length;
-    return `当前预设：<b>${esc(d.presetName)}</b> ｜ 预设内启用正则 ${d.presetEnabledCount} 条 ｜ 快照 ${d.snapshots.length} 条（${ICON.plug}${mounted}${manual ? ` · ${ICON.hand}${manual}` : ''}）`;
+    return `当前预设：<b>${esc(d.presetName)}</b> ｜ 预设内启用正则 <b>${d.presetEnabledCount}</b> 条 ｜ 快照 <b>${d.snapshots.length}</b> 条（${ICON.plug}${mounted}${manual ? ` · ${ICON.hand}${manual}` : ''}）`;
   }
  
   function renderBodyHTML(d) {
@@ -425,7 +615,7 @@
       return `<div class="rxsnap-empty"><i class="fa-regular fa-face-smile"></i>还没有快照。<br>换预设之前点「拍快照」，把当前预设的正则存一份到脚本里。</div>`;
     }
     return d.sortedGroups.map(([gname, items]) => `
-      <div class="rxsnap-grouptitle"><i class="fa-solid fa-box"></i>${esc(gname)}<small>${items.length} 条</small></div>
+      <div class="rxsnap-grouptitle"><i class="fa-solid fa-box"></i>${esc(gname)}<span class="rxsnap-count">${items.length}</span></div>
       ${items.map((s) => {
         const st = statusOf(s, d.mountedIds);
         const tip = `查找: ${s.regex.find_regex ?? ''}\n替换: ${s.regex.replace_string ?? ''}`;
@@ -439,7 +629,7 @@
           <div class="rxsnap-ops">
             <button data-act="toggle" data-id="${esc(s.id)}" title="手动启用/禁用（转为手动管理）">${ICON.power}</button>
             ${s.mode !== 'auto' ? `<button data-act="auto" data-id="${esc(s.id)}" title="恢复自动管理">${ICON.robot}</button>` : ''}
-            <button data-act="del" data-id="${esc(s.id)}" title="删除这条快照"><i class="fa-solid fa-xmark"></i></button>
+            <button class="rxsnap-del" data-act="del" data-id="${esc(s.id)}" title="删除这条快照"><i class="fa-solid fa-xmark"></i></button>
           </div>
         </div>`;
       }).join('')}`).join('');
@@ -448,13 +638,18 @@
   function renderPanelHTML() {
     const d = getPanelData();
     return `${panelCSS}
-<div id="rxsnap">
-  <div class="rxsnap-title"><i class="fa-solid fa-camera-retro"></i>预设正则快照</div>
+<div id="rxsnap" data-theme="${currentTheme}">
+  <div class="rxsnap-head">
+    <div class="rxsnap-title"><i class="fa-solid fa-camera-retro"></i>预设正则快照</div>
+    <button class="rxsnap-theme-btn" data-act="theme" title="切换主题：日间 / 夜间 / 酒馆适配">
+      <i class="fa-solid ${THEME_ICON[currentTheme]}"></i>
+    </button>
+  </div>
   <div class="rxsnap-sub">${renderSubHTML(d)}</div>
   <div class="rxsnap-actions">
-    <div class="menu_button" data-act="snap"><i class="fa-solid fa-camera-retro"></i>拍快照</div>
-    <div class="menu_button" data-act="refresh"><i class="fa-solid fa-arrows-rotate"></i>刷新</div>
-    <div class="menu_button" data-act="clear"><i class="fa-solid fa-trash-can"></i>清空全部</div>
+    <div class="rxsnap-btn rxsnap-btn-primary" data-act="snap"><i class="fa-solid fa-camera-retro"></i>拍快照</div>
+    <div class="rxsnap-btn rxsnap-btn-ghost" data-act="refresh"><i class="fa-solid fa-arrows-rotate"></i>刷新</div>
+    <div class="rxsnap-btn rxsnap-btn-ghost rxsnap-btn-danger" data-act="clear"><i class="fa-solid fa-trash-can"></i>清空全部</div>
   </div>
   <div id="rxsnap-body">${renderBodyHTML(d)}</div>
   <div class="rxsnap-tip"><i class="fa-regular fa-lightbulb"></i> 快照保存在脚本内部，正则面板里看不到。需要生效时自动挂载到全局（${ICON.plug}补位中），原预设在场时自动卸载，防止重复执行。<br>
@@ -481,7 +676,8 @@
     const act = btn.getAttribute('data-act');
     const id = btn.getAttribute('data-id');
     try {
-      if (act === 'snap') await takeSnapshot();
+      if (act === 'theme') cycleTheme();
+      else if (act === 'snap') await takeSnapshot();
       else if (act === 'clear') await clearSnapshots();
       else if (act === 'refresh') await syncMounts();
       else if (act === 'toggle') await toggleOne(id);
