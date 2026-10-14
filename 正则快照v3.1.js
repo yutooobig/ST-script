@@ -344,7 +344,6 @@
   --rx-warn: #b07a12;
   --rx-warn-soft: rgba(176,122,18,.11);
   --rx-danger: #d6404a;
-  --rx-close-bg: rgba(0,0,0,.06);
 }
 .popup:has(#rxsnap[data-theme="dark"]) {
   --rx-bg: #24272c;
@@ -363,7 +362,6 @@
   --rx-warn: #dcb268;
   --rx-warn-soft: rgba(220,178,104,.13);
   --rx-danger: #f3737a;
-  --rx-close-bg: rgba(255,255,255,.08);
 }
 .popup:has(#rxsnap[data-theme="st"]) {
   --rx-bg: var(--SmartThemeBlurTintColor, #2a2d33);
@@ -384,32 +382,41 @@
   --rx-warn: #dcb268;
   --rx-warn-soft: rgba(220,178,104,.13);
   --rx-danger: #e5726f;
-  --rx-close-bg: rgba(128,128,128,.25);
 }
  
-/* ===== 弹窗本体：背景/文字色跟随主题 ===== */
+/* ===== 弹窗本体：背景/文字色跟随主题，统一内边距（对齐基准） ===== */
 .popup:has(#rxsnap) {
   background-color: var(--rx-bg, var(--SmartThemeBlurTintColor)) !important;
   color: var(--rx-text) !important;
+  padding: 16px 18px !important;
   transition: background-color .25s ease, color .25s ease;
 }
  
-/* ===== 关闭按钮：收进窗口内并主题化 ===== */
+/* ===== 关闭按钮：移入标题行文档流（onOpen 里搬移），与主题按钮同规格同对齐 ===== */
 .popup:has(#rxsnap) .popup-button-close {
-  position: absolute !important;
-  top: 10px !important;
-  right: 10px !important;
-  left: auto !important;
-  bottom: auto !important;
-  background: var(--rx-close-bg, rgba(128,128,128,.22)) !important;
-  border-radius: 10px;
-  color: var(--rx-dim, inherit);
-  z-index: 10;
-  transition: background .15s ease, color .15s ease;
+  position: static !important;
+  width: 30px !important;
+  height: 30px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  flex-shrink: 0 !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  background: var(--rx-surface) !important;
+  border: 1px solid var(--rx-border) !important;
+  border-radius: 10px !important;
+  color: var(--rx-dim) !important;
+  font-size: 14px !important;
+  box-shadow: none !important;
+  cursor: pointer;
+  transition: all .15s ease !important;
 }
 .popup:has(#rxsnap) .popup-button-close:hover {
-  background: var(--rx-surface-hover, rgba(128,128,128,.3)) !important;
-  color: var(--rx-text, inherit) !important;
+  background: var(--rx-surface-hover) !important;
+  color: var(--rx-text) !important;
 }
  
 /* ===== 布局 ===== */
@@ -425,7 +432,6 @@
  
 #rxsnap .rxsnap-head {
   display: flex; align-items: center; gap: 10px;
-  padding-right: 44px; /* 给关闭按钮让位 */
   margin-bottom: 2px;
 }
 #rxsnap .rxsnap-title {
@@ -698,7 +704,20 @@
     const popup = new SillyTavern.Popup(renderPanelHTML(), type, '', {
       wide: true,
       allowVerticalScrolling: true,
-      onOpen: (p) => { try { p.dlg.addEventListener('click', onPanelClick); } catch {} },
+      onOpen: (p) => {
+        try {
+          // 原生关闭按钮是“圆圈叉”图标 + 圆形按钮样式，换成与主题按钮一致的简洁线性图标
+          const closeBtn = p.dlg.querySelector('.popup-button-close');
+          if (closeBtn) {
+            closeBtn.classList.remove('right_menu_button', 'fa-circle-xmark');
+            closeBtn.classList.add('fa-xmark');
+            // 把关闭按钮搬进标题行文档流，与主题按钮同行对齐（不再依赖定位补差值）
+            const head = p.dlg.querySelector('.rxsnap-head');
+            if (head && closeBtn.parentElement !== head) head.appendChild(closeBtn);
+          }
+          p.dlg.addEventListener('click', onPanelClick);
+        } catch {}
+      },
       onClose: (p) => {
         try { p.dlg.removeEventListener('click', onPanelClick); } catch {}
         panelPopup = null;
